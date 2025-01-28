@@ -1,6 +1,7 @@
 import requests
 import pymysql
 from bs4 import BeautifulSoup
+from datetime import datetime
 
 # Database connection configuration
 db_config = {
@@ -31,7 +32,7 @@ def extract_event_data(item):
     date = f"{day} {month}"
     location = item.find('div', class_='agenda-item__subtitle u-text--small').text.strip() if item.find('div', class_='agenda-item__subtitle u-text--small') else "Unknown Location"
     ticket_link = item.find('a', class_='agenda-item__link')['href'] if item.find('a', class_='agenda-item__link') else None
-
+    
     # Extract the image URL if available
     event_picture = None
     picture_tag = item.find('picture')
@@ -44,7 +45,16 @@ def extract_event_data(item):
                 if srcset_url.startswith("/media/"):
                     srcset_url = f"https://www.mojo.nl{srcset_url}"  # Add the base URL
                 event_picture = srcset_url
-    return name, date, location, ticket_link, event_picture
+    
+    # If no event picture is found, use a default image link
+    if not event_picture:
+        event_picture = "http://[::1]:5173/resources/assets/opus.png"
+        
+    
+    # Standard description text
+    description = "No description available.Welcome to OpusEvents, your go-to platform for discovering the best events across the Netherlands! Whether you're into music festivals, theater shows, sports events, or live concerts, we’ve got you covered. At OpusEvents, we make finding your next unforgettable experience easy and hassle-free. Explore a curated list of events, check out detailed schedules, and conveniently access ticket purchasing through trusted third-party platforms. We’re passionate about connecting people to the moments that matter. Our mission is to bring you closer to the events you love, all in one place. Let’s make memories together!"
+   
+    return name, date, location, ticket_link, event_picture, description
 
 # Function to insert event into the database
 def insert_event(cursor, event_data):
@@ -52,6 +62,19 @@ def insert_event(cursor, event_data):
         INSERT INTO events (event_name, event_date, location, event_type, description, ticket_link, event_picture)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
     """
+    # Convert the event_date to the desired format
+    event_name, date, location, event_type, description, ticket_link, event_picture = event_data
+    # Convert month abbreviations to full month names
+    month_translation = {
+        'jan.': 'January', 'feb.': 'February', 'mrt.': 'March', 'apr.': 'April',
+        'mei': 'May', 'jun.': 'June', 'jul.': 'July', 'aug.': 'August',
+        'sep.': 'September', 'okt.': 'October', 'nov.': 'November', 'dec.': 'December'
+    }
+    day, month_abbr = date.split()
+    month_full = month_translation.get(month_abbr.lower(), month_abbr)
+    formatted_date = datetime.strptime(f"{day} {month_full} 20:00", "%d %B %H:%M").replace(year=datetime.now().year).isoformat()
+    event_data = (event_name, formatted_date, location, event_type, description, ticket_link, event_picture)
+    
     cursor.execute(sql, event_data)
     cursor.connection.commit()
 
@@ -71,11 +94,11 @@ def scrape_page(page_number, cursor):
     for item in agenda_items:
         try:
             # Extract event data
-            name, date, location, ticket_link, event_picture = extract_event_data(item)
+            name, date, location, ticket_link, event_picture, description = extract_event_data(item)
 
             # Prepare the data for insertion
             event_data = (
-                name, date, location, "Music", None, ticket_link, event_picture
+                name, date, location, "Music", description, ticket_link, event_picture
             )
 
             # Insert the event into the database
